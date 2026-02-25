@@ -1,6 +1,6 @@
 import {App, Editor, MarkdownView, Modal, Notice, Plugin, TFile, TAbstractFile} from 'obsidian';
 import {DEFAULT_SETTINGS, DSASettings, DSASettingTab} from "./settings";
-import parseFile from './parseFIle'
+import parseFile from './parseFile'
 
 // Remember to rename these classes and interfaces!
 
