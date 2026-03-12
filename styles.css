@@ -1,8 +1,265 @@
-/*
+/* Day Planner Analyzer – Stats Modal */
+.modal.odpa-stats-modal {
+  width: 900px;
+  max-width: 95vw;
+  max-height: 85vh;
+}
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+.modal.odpa-stats-modal .modal-content {
+  height: 75vh;
+  max-height: 75vh;
+  overflow-y: auto;
+  padding: 1.25rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
 
-If your plugin does not need CSS, delete this file.
+.odpa-stats-body {
+  --odpa-radius: 8px;
+  --odpa-gap: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
 
-*/
+/* Header */
+.odpa-stats-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.odpa-stats-header-left .odpa-stats-subtitle {
+  margin: 0.25rem 0 0;
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+
+.odpa-stats-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.odpa-info-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.8em;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--odpa-radius);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.odpa-info-button:hover {
+  background: var(--background-secondary-alt);
+  color: var(--text-normal);
+}
+
+.odpa-info-arrow {
+  display: inline-block;
+  transition: transform 0.15s ease-out;
+}
+
+.odpa-info-button.is-active .odpa-info-arrow {
+  transform: rotate(90deg);
+}
+
+.odpa-info-dropdown {
+  margin-top: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: var(--odpa-radius);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  font-size: 0.85em;
+  animation: odpa-info-slide-down 0.18s ease-out;
+}
+
+@keyframes odpa-info-slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.odpa-info-dropdown h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.9em;
+}
+
+.odpa-info-dropdown p {
+  margin: 0 0 0.5rem;
+  color: var(--text-muted);
+}
+
+.odpa-info-dropdown ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.odpa-info-dropdown li {
+  margin-bottom: 0.25rem;
+}
+
+.odpa-stats-updated {
+  font-size: 0.8em;
+  color: var(--text-muted);
+}
+
+/* Tabs */
+.odpa-stats-tabs {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.odpa-tab {
+  padding: 0.5rem 1rem;
+  font-size: 0.9em;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--odpa-radius);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.odpa-tab:hover {
+  background: var(--background-secondary-alt);
+  color: var(--text-normal);
+}
+
+.odpa-tab.is-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+/* Summary cards */
+.odpa-stats-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--odpa-gap);
+}
+
+.odpa-card {
+  flex: 1 1 140px;
+  min-width: 0;
+  padding: 0.75rem 1rem;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--odpa-radius);
+}
+
+.odpa-card-label {
+  font-size: 0.8em;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+}
+
+.odpa-card-value {
+  font-size: 1.1em;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+/* Main two-column layout */
+.odpa-stats-main {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--odpa-gap);
+}
+
+@media (max-width: 600px) {
+  .odpa-stats-main {
+    grid-template-columns: 1fr;
+  }
+}
+
+.odpa-panel {
+  padding: 1rem;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--odpa-radius);
+}
+
+.odpa-panel h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1em;
+}
+
+.odpa-highlights-list {
+  margin: 0;
+  padding-left: 1.25rem;
+  color: var(--text-normal);
+}
+
+.odpa-highlights-list li {
+  margin-bottom: 0.35rem;
+}
+
+.odpa-chart-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 160px;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: var(--odpa-radius);
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
+/* Table section */
+.odpa-table-section h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1em;
+}
+
+.odpa-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--odpa-radius);
+  background: var(--background-secondary);
+}
+
+.odpa-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.odpa-table th,
+.odpa-table td {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.odpa-table th {
+  color: var(--text-muted);
+  font-weight: 600;
+  background: var(--background-secondary-alt);
+}
+
+.odpa-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.odpa-table tbody tr:hover {
+  background: var(--background-modifier-hover);
+}

@@ -1,17 +1,19 @@
 import { App, TFile } from "obsidian"
-//import getIdleTime from "./getIdleTime"
+import getIdleTime from "./getIdleTime"
                           
-interface TimeBlock {
+export interface TimeBlock {
     name: string,
     startTime: number,
-    endTime: number
+    endTime: number,
+    completed: boolean,
+    priority: boolean,
 }
 
 const parseFile = async (app: App, file: TFile) => {
     
     const schedule: TimeBlock[] = []
     
-    function getTime(val: string, ind: number): { time: number, newInd: number } {
+    function getTime(val: string, ind: number): { time: number, newInd: number, star: boolean} {
         try{
             let time = 0;
             let curr = ''
@@ -30,23 +32,31 @@ const parseFile = async (app: App, file: TFile) => {
                 ind++;
             }
             curr = curr.replace(/\s/g, '');
+            let star = false
+            if(curr.endsWith('*')){
+                star = true
+                curr = curr.slice(0, -1)
+            }
             if(curr[curr.length-1]==='m'){
                 if(curr[curr.length-2]==='p'){
-                    if(time!==720)
-                    time+=720
+                    if(time!==720){
+                        time+=720
+                    }
                 }
                 curr = curr.slice(0, -2);
             }
             time+=Number(curr);
             return {
                 time: time,
-                newInd: ind
+                newInd: ind,
+                star: star
             }
         }
         catch(e){
             return {
                 time: -1,
-                newInd: -1
+                newInd: -1,
+                star: false
             }
         } 
     }
@@ -63,6 +73,16 @@ const parseFile = async (app: App, file: TFile) => {
         
         let ind = 0;
         const len = val.length
+        let completed = false
+        while(ind<len && val[ind] !== '['){
+            ind++
+        }
+        while(ind<len && val[ind] !== ']'){
+            if(val[ind] === 'x'){
+                completed = true
+            }
+            ind++
+        }
         while(ind<len && (val[ind] === ' ' || isNaN(Number(val[ind])))){
             ind++;
         }
@@ -92,7 +112,9 @@ const parseFile = async (app: App, file: TFile) => {
         schedule.push({
             name: name,
             startTime: startTime,
-            endTime: endTime
+            endTime: endTime,
+            completed: completed, //placeholder,
+            priority: ret.star //placeholder
         })
         return true;
     }
@@ -115,13 +137,13 @@ const parseFile = async (app: App, file: TFile) => {
     }
     const criticalTimes = await parse();
     schedule.sort((a, b) => a.startTime - b.startTime)
-    let date = file.basename
+    const date = file.basename
     return {
         schedule,
         date,
         earliest: criticalTimes.minTime,
         latest: criticalTimes.maxTime,
-        //idle: getIdleTime(schedule, criticalTimes.maxTime - criticalTimes.minTime)
+        idle: getIdleTime(schedule, criticalTimes.maxTime - criticalTimes.minTime)
     }
 }
 

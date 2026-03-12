@@ -22,6 +22,14 @@ export default tseslint.config(
 		},
 	},
 	...obsidianmd.configs.recommended,
+	{
+		rules: {
+			"import/no-extraneous-dependencies": [
+				"error",
+				{ packageDir: import.meta.dirname },
+			],
+		},
+	},
 	globalIgnores([
 		"node_modules",
 		"dist",
