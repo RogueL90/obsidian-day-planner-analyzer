@@ -2,6 +2,8 @@ import { App, Modal, Plugin, TFile } from "obsidian";
 import { TimeBlock } from "./parseFile";
 import parseFile from './parseFile'
 import { DEFAULT_SETTINGS, DSASettings } from "./settings";
+import convTime from './convTime'
+import timeFormat from'./timeFormat'
 
 type DayData = {
 	schedule: TimeBlock[],
@@ -97,6 +99,26 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
     this.renderTasksTable();
   }
 
+  private renderCustom() {
+    if (!this.bodyEl) return;
+    this.bodyEl.empty();
+    this.renderHeader();
+    if (this.showInfo) {
+      this.renderInfoDropdown();
+    }
+    this.renderTabs();
+
+    const main = this.bodyEl.createDiv({ cls: "odpa-stats-main" });
+
+    const left = main.createDiv({ cls: "odpa-panel odpa-panel-highlights" });
+    left.createEl("h3", { text: "Custom" });
+    const list = left.createEl("ul", { cls: "odpa-highlights-list" });
+    ["Enter how long you want, between x and y"].forEach((text) =>
+      list.createEl("li", { text })
+    );
+
+  }
+
   private renderHeader() {
     const header = this.bodyEl!.createDiv({ cls: "odpa-stats-header" });
     const left = header.createDiv({ cls: "odpa-stats-header-left" });
@@ -140,8 +162,10 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
 
     const list = info.createEl("ul");
     [
+      "Best compatable with Daily Scheduler plugin",
       "Daily notes use YYYY-MM-DD.md naming convention for each file",
       "To mark tasks as priority for the day, put a star after the end time. Ex) 4:00pm - 4:30pm* Meditate",
+      "To comment specifications of a task without it affecting the task analysis, comment with '//' AFTER the task name. Ex) 4:00pm - 4:30pm Meditate // with waterfall sounds",
     ].forEach((text) => {
       list.createEl("li", { text });
     });
@@ -159,7 +183,15 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
       if (this.activeTab === id) tab.addClass("is-active");
       tab.addEventListener("click", () => {
         this.activeTab = id;
+        if(id == "7d"){
+        this.getDisplayDataPast(30)
         this.renderResults(); 
+        } else if(id == "30d"){
+        this.getDisplayDataPast(45)
+        this.renderResults(); 
+        } else{
+          this.renderCustom();
+        }
         // Compute parameters
       });
     });
@@ -197,15 +229,15 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
     }
     start /= len;
     end /= len;
-    const priorityRate = completedPriorityTasks/priorityTasks*100
+    const priorityRate = priorityTasks === 0 ? "N/A" : completedPriorityTasks/priorityTasks*100
     const taskRate = completedTasks/totalTasks*100
     console.error(idleTime)
     const row = this.bodyEl!.createDiv({ cls: "odpa-stats-cards" });
     const cards: { label: string; value: string }[] = [
       { label: "Days analyzed", value: ""+this.currDayData.length },
-      { label: "Avg day length", value: ""+Math.round(start) +"—" + Math.round(end)},
-      { label: "Avg Unplanned/idle time", value: ""+Math.round(idleTime/len) },
-      { label: "Priority task completion rate", value: priorityRate.toFixed(1)+"%" },
+      { label: "Avg day length", value: ""+convTime(Math.round(start)) +" - " + convTime(Math.round(end))},
+      { label: "Avg Unplanned/idle time", value: ""+timeFormat(Math.round(idleTime/len)) },
+      { label: "Priority task completion rate", value: priorityRate==="N/A" ? priorityRate : priorityRate.toFixed(1)+"%" },
       { label: "Task completion rate", value: taskRate.toFixed(1)+"%" },
     ];
     cards.forEach((c) => this.renderCard(row, c.label, c.value));

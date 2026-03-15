@@ -107,7 +107,15 @@ const parseFile = async (app: App, file: TFile) => {
         while(val[ind]===' '){
             ind++;
         }
-        name = val.substring(ind, len)
+        let end = ind;
+        while(end<len){
+            if(val[end] == '/' && val[end-1] == '/'){
+                end-=1;
+                break;
+            }
+            end++;
+        }
+        name = val.substring(ind, end)
         //console.log(name)
         schedule.push({
             name: name,
