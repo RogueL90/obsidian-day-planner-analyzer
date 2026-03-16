@@ -52,7 +52,7 @@ const parseFile = async (app: App, file: TFile) => {
                 star: star
             }
         }
-        catch(e){
+        catch {
             return {
                 time: -1,
                 newInd: -1,
