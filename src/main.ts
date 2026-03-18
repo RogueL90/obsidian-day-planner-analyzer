@@ -1,4 +1,15 @@
 import { App, Modal, Plugin, TFile } from "obsidian";
+// eslint-disable-next-line import/no-extraneous-dependencies
+import {
+  Chart,
+  LineController,
+  LineElement,
+  PointElement,
+  LinearScale,
+  CategoryScale,
+  Tooltip,
+  Legend,
+} from "chart.js";
 import { TimeBlock } from "./parseFile";
 import parseFile from './parseFile'
 import { DEFAULT_SETTINGS, DSASettings } from "./settings";
@@ -15,11 +26,28 @@ type DayData = {
 
 type TabId = "7d" | "30d" | "custom";
 
+Chart.register(
+  LineController,
+  LineElement,
+  PointElement,
+  LinearScale,
+  CategoryScale,
+  Tooltip,
+  Legend,
+);
+
+const setCssProps = (el: HTMLElement, props: Record<string, string>) => {
+  for (const [key, value] of Object.entries(props)) {
+    el.style.setProperty(key, value);
+  }
+};
+
 class StatsModal extends Modal {
   private activeTab: TabId = "7d";
   private bodyEl: HTMLElement | null = null;
   private showInfo = false;
-  private currDayData: DayData[] = []
+  private currDayData: DayData[] = [];
+  private taskChart: Chart | null = null;
 
   constructor(
     app: App,
@@ -86,6 +114,10 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
   private renderResults() {
     console.error(this.currDayData)
     if (!this.bodyEl) return;
+    if (this.taskChart) {
+      this.taskChart.destroy();
+      this.taskChart = null;
+    }
     this.bodyEl.empty();
 
     this.renderHeader();
@@ -108,15 +140,171 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
     }
     this.renderTabs();
 
-    const main = this.bodyEl.createDiv({ cls: "odpa-stats-main" });
+    const customWrap = this.bodyEl.createDiv({ cls: "odpa-custom-controls" });
 
-    const left = main.createDiv({ cls: "odpa-panel odpa-panel-highlights" });
-    left.createEl("h3", { text: "Custom" });
-    const list = left.createEl("ul", { cls: "odpa-highlights-list" });
-    ["Enter how long you want, between x and y"].forEach((text) =>
-      list.createEl("li", { text })
-    );
+    const title = customWrap.createDiv({ cls: "odpa-custom-title" });
+    title.createEl("h3", { text: "Custom stats" });
+    title.createEl("p", {
+      cls: "odpa-custom-subtitle",
+      text: "Choose how you want to define the time range, then press calculate.",
+    });
 
+    const optionsWrap = customWrap.createDiv({
+      cls: "odpa-custom-options",
+      attr: { style: "margin-top: 0.75rem; margin-bottom: 0.25rem;" },
+    });
+    const errorEl = customWrap.createDiv({
+      cls: "odpa-custom-error",
+      attr: { style: "margin-top: 0.5rem; min-height: 1.2em;" },
+    });
+
+    type Mode = "past" | "range" | "lifetime";
+    let mode: Mode = "past";
+
+    const makeRadioRow = (labelText: string, value: Mode) => {
+      const row = optionsWrap.createDiv({
+        cls: "odpa-custom-row",
+        attr: { style: "display: flex; flex-direction: column; align-items: flex-start; margin-bottom: 0.75rem;" },
+      });
+      const left = row.createDiv({
+        cls: "odpa-custom-row-left",
+        attr: { style: "display: flex; align-items: center; gap: 0.35rem;" },
+      });
+      const right = row.createDiv({
+        cls: "odpa-custom-row-right",
+        attr: { style: "margin-top: 0.25rem;" },
+      });
+
+      const radio = left.createEl("input", {
+        attr: {
+          type: "radio",
+          name: "odpa-custom-mode",
+        },
+      });
+      if (value === mode) radio.checked = true;
+
+      const label = left.createEl("label", { text: labelText });
+
+      const selectThis = () => {
+        mode = value;
+        const radios = optionsWrap.querySelectorAll<HTMLInputElement>('input[type="radio"][name="odpa-custom-mode"]');
+        radios.forEach((r) => {
+          r.checked = r === radio;
+        });
+        errorEl.empty();
+      };
+
+      radio.addEventListener("change", () => {
+        if (radio.checked) selectThis();
+      });
+      label.addEventListener("click", () => {
+        radio.checked = true;
+        selectThis();
+      });
+
+      return { row, right };
+    };
+
+    // Option A: past N days
+    const { right: pastRight } = makeRadioRow("Past N days", "past");
+    pastRight.createSpan({ text: "Past " });
+    const pastInput = pastRight.createEl("input", {
+      attr: {
+        type: "number",
+        min: "1",
+        placeholder: "7",
+        style: "width: 4rem; margin-right: 0.25rem;",
+      },
+    });
+    pastRight.createSpan({ text: " days" });
+
+    // Option B: between dates
+    const { right: rangeRight } = makeRadioRow("Between dates", "range");
+    rangeRight.createSpan({ text: "From " });
+    const startInput = rangeRight.createEl("input", {
+      attr: {
+        type: "date",
+        style: "margin: 0 0.25rem;",
+      },
+    });
+    rangeRight.createSpan({ text: " to " });
+    const endInput = rangeRight.createEl("input", {
+      attr: {
+        type: "date",
+        style: "margin: 0 0.25rem;",
+      },
+    });
+
+    // Option C: lifetime
+    makeRadioRow("All time (lifetime stats)", "lifetime");
+
+    const actions = customWrap.createDiv({
+      cls: "odpa-custom-actions",
+      attr: { style: "margin-top: 0.25rem;" },
+    });
+    const calculateBtn = actions.createEl("button", {
+      cls: "odpa-button odpa-button-primary",
+      text: "Calculate stats  ❯",
+      attr: {
+        style:
+          "margin-top: 0.5rem; padding: 0.45rem 0.9rem; font-size: 0.95rem; background-color: var(--color-green); color: var(--background-primary); transition: background-color 0.12s ease, transform 0.05s ease;",
+      },
+    });
+
+    // Basic press feedback (visual interaction)
+    calculateBtn.addEventListener("mousedown", () => {
+      setCssProps(calculateBtn, { transform: "scale(0.98)" });
+    });
+    const resetButtonVisual = () => {
+      setCssProps(calculateBtn, { transform: "" });
+    };
+    calculateBtn.addEventListener("mouseup", resetButtonVisual);
+    calculateBtn.addEventListener("mouseleave", resetButtonVisual);
+
+    calculateBtn.addEventListener("click", (evt) => {
+      evt.preventDefault();
+      errorEl.empty();
+
+      // Brief color flash on click to indicate action
+      const originalBg = calculateBtn.style.getPropertyValue("background-color");
+      setCssProps(calculateBtn, { "background-color": "var(--color-green-dark, #2a8a3a)" });
+      window.setTimeout(() => {
+        setCssProps(calculateBtn, { "background-color": originalBg });
+      }, 120);
+
+      if (mode === "lifetime") {
+        this.getDisplayDataPast(-1);
+        this.renderResults();
+        return;
+      }
+
+      if (mode === "past") {
+        const numVal = pastInput.value.trim();
+        const days = Number(numVal);
+        if (!numVal || Number.isNaN(days) || days <= 0) {
+          errorEl.createSpan({ text: "Please enter a positive number of days." });
+          return;
+        }
+        this.getDisplayDataPast(days);
+        this.renderResults();
+        return;
+      }
+
+      if (mode === "range") {
+        const startVal = startInput.value;
+        const endVal = endInput.value;
+        if (!startVal || !endVal) {
+          errorEl.createSpan({ text: "Please select both a start and end date." });
+          return;
+        }
+        if (startVal > endVal) {
+          errorEl.createSpan({ text: "Start date must be on or before end date." });
+          return;
+        }
+        this.getDisplayDataBetw(startVal, endVal);
+        this.renderResults();
+      }
+    });
   }
 
   private renderHeader() {
@@ -252,17 +440,259 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
   private renderMainContent() {
     const main = this.bodyEl!.createDiv({ cls: "odpa-stats-main" });
 
-    const left = main.createDiv({ cls: "odpa-panel odpa-panel-highlights" });
+    const left = main.createDiv({
+      cls: "odpa-panel odpa-panel-highlights",
+      attr: {
+        style: "flex: 0 0 260px; max-width: 260px;",
+      },
+    });
     left.createEl("h3", { text: "Highlights" });
     const list = left.createEl("ul", { cls: "odpa-highlights-list" });
     ["Most productive day: —", "Earliest start: —", "Longest idle gap: —"].forEach((text) =>
       list.createEl("li", { text })
     );
 
-    const right = main.createDiv({ cls: "odpa-panel odpa-panel-chart" });
-    right.createEl("h3", { text: "Chart" });
-    const chartBox = right.createDiv({ cls: "odpa-chart-placeholder" });
-    chartBox.createEl("span", { text: "Chart goes here" });
+    const right = main.createDiv({
+      cls: "odpa-panel odpa-panel-chart",
+      attr: {
+        style: "flex: 1 1 auto; min-width: 0;",
+      },
+    });
+
+    const chartHeader = right.createDiv({
+      cls: "odpa-chart-header",
+      attr: {
+        style:
+          "display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;",
+      },
+    });
+    chartHeader.createEl("h3", { text: "Chart" });
+
+    const selectWrap = chartHeader.createDiv({
+      cls: "odpa-chart-select-wrap",
+      attr: {
+        style:
+          "display: flex; align-items: center; gap: 0.25rem; max-width: 60%; flex: 0 1 60%; justify-content: flex-end; overflow: hidden;",
+      },
+    });
+    selectWrap.createEl("span", {
+      text: "Task:",
+      cls: "odpa-chart-select-label",
+    });
+
+    const selectEl = selectWrap.createEl("select", {
+      cls: "odpa-chart-select",
+    });
+    setCssProps(selectEl, {
+      "max-width": "100%",
+      "min-width": "10rem",
+      "white-space": "nowrap",
+      overflow: "hidden",
+      "text-overflow": "ellipsis",
+    });
+
+    const chartBox = right.createDiv({
+      cls: "odpa-chart-placeholder",
+      attr: {
+        style:
+          "margin-top: 0.5rem; height: 180px !important; max-height: 180px !important; flex: 0 0 auto; overflow: hidden; box-sizing: border-box; display: flex; flex-direction: column;",
+      },
+    });
+
+    const canvasWrap = chartBox.createDiv({
+      cls: "odpa-chart-canvas-wrap",
+      attr: {
+        style: "flex: 1; min-height: 0; position: relative;",
+      },
+    });
+
+    const canvas = canvasWrap.createEl("canvas", {
+      cls: "odpa-chart-canvas",
+    });
+    setCssProps(canvas, {
+      width: "100%",
+      height: "100%",
+      display: "block",
+    });
+
+    const legendEl = chartBox.createDiv({
+      cls: "odpa-chart-legend",
+      attr: {
+        style: "margin-top: 4px; font-size: 0.7rem; color: var(--text-muted);",
+      },
+    });
+    legendEl.setText(
+      "Line shows total minutes spent on the selected task each day.",
+    );
+
+    const chartEmptyState = () => {
+      if (this.taskChart) {
+        this.taskChart.destroy();
+        this.taskChart = null;
+      }
+    };
+
+    // Helper to normalize task names (ignore casing and extra spacing)
+    const normalizeTaskName = (name: string) =>
+      name.trim().toLowerCase().replace(/\s+/g, " ");
+
+    // Collect unique task names from current data (normalized)
+    const taskNameMap = new Map<string, string>(); // normalized -> display name
+    for (const day of this.currDayData) {
+      for (const block of day.schedule) {
+        const trimmed = block.name.trim();
+        const norm = normalizeTaskName(trimmed);
+        if (norm && !taskNameMap.has(norm)) {
+          taskNameMap.set(norm, trimmed);
+        }
+      }
+    }
+
+    const namesArray = Array.from(taskNameMap.values()).sort((a, b) =>
+      a.localeCompare(b)
+    );
+
+    // Pick default task: highest total minutes across the analyzed range
+    const totalByTask = new Map<string, number>(); // normalized -> total minutes
+    for (const day of this.currDayData) {
+      for (const block of day.schedule) {
+        const norm = normalizeTaskName(block.name);
+        if (!norm) continue;
+        const prev = totalByTask.get(norm) ?? 0;
+        totalByTask.set(norm, prev + (block.endTime - block.startTime));
+      }
+    }
+    let defaultTaskNorm = "";
+    let defaultTaskMinutes = -1;
+    for (const [norm, minutes] of totalByTask) {
+      if (minutes > defaultTaskMinutes) {
+        defaultTaskMinutes = minutes;
+        defaultTaskNorm = norm;
+      }
+    }
+    const defaultTaskDisplay = defaultTaskNorm ? (taskNameMap.get(defaultTaskNorm) ?? "") : "";
+
+    // Populate dropdown
+    const placeholderOption = selectEl.createEl("option", {
+      text: "Select task",
+      attr: { value: "" },
+    });
+    placeholderOption.selected = !defaultTaskDisplay;
+
+    namesArray.forEach((name) => {
+      selectEl.createEl("option", {
+        text: name,
+        attr: { value: name },
+      });
+    });
+
+    const renderTaskChart = (taskName: string) => {
+      if (!taskName) {
+        chartEmptyState();
+        return;
+      }
+
+      // Build per-day totals for this task
+      const dayDurations: { date: string; minutes: number }[] = [];
+      for (const day of this.currDayData) {
+        let total = 0;
+        for (const block of day.schedule) {
+          if (normalizeTaskName(block.name) === normalizeTaskName(taskName)) {
+            total += block.endTime - block.startTime;
+          }
+        }
+        dayDurations.push({ date: day.date, minutes: total });
+      }
+
+      const labels = dayDurations.map((d) => {
+        const dateObj = new Date(d.date);
+        return Number.isNaN(dateObj.getTime())
+          ? d.date
+          : dateObj.toLocaleDateString(undefined, {
+              year: "2-digit",
+              month: "2-digit",
+              day: "2-digit",
+            });
+      });
+
+      const data = dayDurations.map((d) => d.minutes / 60); // hours
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      if (this.taskChart) {
+        this.taskChart.data.labels = labels;
+        if (this.taskChart.data.datasets[0]) {
+          this.taskChart.data.datasets[0].data = data;
+          this.taskChart.data.datasets[0].label = taskName;
+        }
+        this.taskChart.update();
+        return;
+      }
+
+      this.taskChart = new Chart(ctx, {
+        type: "line",
+        data: {
+          labels,
+          datasets: [
+            {
+              label: taskName,
+              data,
+              borderColor: "#a78bfa",
+              backgroundColor: "rgba(167, 139, 250, 0.20)",
+              tension: 0.3,
+              pointRadius: 3,
+              pointBackgroundColor: "#a78bfa",
+              pointHoverRadius: 4,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              display: false,
+            },
+            tooltip: {
+              callbacks: {
+                label(context) {
+                  const val = context.parsed.y as number;
+                  return `${val.toFixed(2)} hours`;
+                },
+              },
+            },
+          },
+          scales: {
+            x: {
+              ticks: {
+                maxTicksLimit: 5,
+              },
+            },
+            y: {
+              beginAtZero: true,
+              ticks: {
+                callback(value) {
+                  return `${value}h`;
+                },
+              },
+            },
+          },
+        },
+      });
+    };
+
+    if (defaultTaskDisplay) {
+      selectEl.value = defaultTaskDisplay;
+      renderTaskChart(defaultTaskDisplay);
+    } else {
+      chartEmptyState();
+    }
+
+    selectEl.addEventListener("change", () => {
+      const value = selectEl.value;
+      renderTaskChart(value);
+    });
   }
 
   private renderDailyTable() {
