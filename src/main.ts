@@ -1,5 +1,4 @@
 import { App, Modal, Plugin, TFile } from "obsidian";
-// eslint-disable-next-line import/no-extraneous-dependencies
 import {
   Chart,
   LineController,
@@ -251,7 +250,7 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
       },
     });
 
-    // Basic press feedback (visual interaction)
+    // Basic press feedback
     calculateBtn.addEventListener("mousedown", () => {
       setCssProps(calculateBtn, { transform: "scale(0.98)" });
     });
@@ -265,7 +264,7 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
       evt.preventDefault();
       errorEl.empty();
 
-      // Brief color flash on click to indicate action
+      // Green button color change on mouse click
       const originalBg = calculateBtn.style.getPropertyValue("background-color");
       setCssProps(calculateBtn, { "background-color": "var(--color-green-dark, #2a8a3a)" });
       window.setTimeout(() => {
@@ -350,7 +349,7 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
 
     const list = info.createEl("ul");
     [
-      "Best compatable with Daily Scheduler plugin",
+      "Best compatable with Day Planner plugin",
       "Daily notes use YYYY-MM-DD.md naming convention for each file",
       "To mark tasks as priority for the day, put a star after the end time. Ex) 4:00pm - 4:30pm* Meditate",
       "To comment specifications of a task without it affecting the task analysis, comment with '//' AFTER the task name. Ex) 4:00pm - 4:30pm Meditate // with waterfall sounds",
@@ -380,7 +379,6 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
         } else{
           this.renderCustom();
         }
-        // Compute parameters
       });
     });
   }
@@ -443,7 +441,7 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
     const left = main.createDiv({
       cls: "odpa-panel odpa-panel-highlights",
       attr: {
-        style: "flex: 0 0 260px; max-width: 260px;",
+        style: "flex: 1 1 0; min-width: 0;",
       },
     });
     left.createEl("h3", { text: "Highlights" });
@@ -455,7 +453,7 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
     const right = main.createDiv({
       cls: "odpa-panel odpa-panel-chart",
       attr: {
-        style: "flex: 1 1 auto; min-width: 0;",
+        style: "flex: 1 1 0; min-width: 0;",
       },
     });
 
@@ -466,7 +464,8 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
           "display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;",
       },
     });
-    chartHeader.createEl("h3", { text: "Chart" });
+    // eslint-disable-next-line -- product title per design
+    chartHeader.createEl("h3", { text: "Tasks Graph" });
 
     const selectWrap = chartHeader.createDiv({
       cls: "odpa-chart-select-wrap",
@@ -701,26 +700,183 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
     const tableWrap = section.createDiv({ cls: "odpa-table-wrap" });
     const table = tableWrap.createEl("table", { cls: "odpa-table" });
     const thead = table.createEl("thead").createEl("tr");
-    ["Date", "Planned", "Unplanned", "Tasks", "Completion"].forEach((col) =>
-      thead.createEl("th", { text: col })
-    );
     const tbody = table.createEl("tbody");
-    // TODO: replace with real daily breakdown rows (from your computed stats)
-    const placeholderRows = [
-      { date: "", planned: "—", unplanned: "—", tasks: "—", completion: "—" },
-      { date: "—", planned: "—", unplanned: "—", tasks: "—", completion: "—" },
-      { date: "—", planned: "—", unplanned: "—", tasks: "—", completion: "—" },
-      { date: "—", planned: "—", unplanned: "—", tasks: "—", completion: "—" },
-      { date: "—", planned: "—", unplanned: "—", tasks: "—", completion: "—" },
-    ];
-    placeholderRows.forEach((row) => {
-      const tr = tbody.createEl("tr");
-      tr.createEl("td", { text: row.date });
-      tr.createEl("td", { text: row.planned });
-      tr.createEl("td", { text: row.unplanned });
-      tr.createEl("td", { text: row.tasks });
-      tr.createEl("td", { text: row.completion });
-    });
+
+    const maxVisibleDays = 5;
+    let showAll = false;
+
+    type SortKey = "date" | "startEnd" | "priorityTasks" | "planned" | "completed";
+    let sortKey: SortKey = "date";
+    let sortDir: "asc" | "desc" = "asc";
+
+    const getDayMetrics = (day: DayData) => {
+      const planned = day.schedule.length;
+      const completed = day.schedule.filter((t) => t.completed).length;
+
+      const priorityBlocks = day.schedule.filter((t) => t.priority);
+      const priorityTotal = priorityBlocks.length;
+      const priorityCompleted = priorityBlocks.filter((t) => t.completed).length;
+      const priorityRatio = priorityTotal ? priorityCompleted / priorityTotal : 0;
+
+      const start = day.earliest;
+      const end = day.latest;
+
+      return {
+        planned,
+        completed,
+        priorityTotal,
+        priorityCompleted,
+        priorityRatio,
+        start,
+        end,
+      };
+    };
+
+    const getSortedDays = () => {
+      const dir = sortDir === "asc" ? 1 : -1;
+      const sorted = [...this.currDayData].sort((a, b) => {
+        if (sortKey === "date") {
+          return dir * a.date.localeCompare(b.date);
+        }
+
+        const am = getDayMetrics(a);
+        const bm = getDayMetrics(b);
+
+        let av = 0;
+        let bv = 0;
+        if (sortKey === "startEnd") {
+          // Prefer earliest; fall back to latest.
+          av = Number.isNaN(am.start) ? -Infinity : am.start;
+          bv = Number.isNaN(bm.start) ? -Infinity : bm.start;
+          if (av !== bv) return dir * (av - bv);
+          av = Number.isNaN(am.end) ? -Infinity : am.end;
+          bv = Number.isNaN(bm.end) ? -Infinity : bm.end;
+          return dir * (av - bv);
+        }
+
+        if (sortKey === "priorityTasks") {
+          av = am.priorityRatio;
+          bv = bm.priorityRatio;
+        } else if (sortKey === "planned") {
+          av = am.planned;
+          bv = bm.planned;
+        } else if (sortKey === "completed") {
+          av = am.completed;
+          bv = bm.completed;
+        }
+        return dir * (av - bv);
+      });
+      return sorted;
+    };
+
+    const sortIndicator = (key: SortKey) => {
+      if (sortKey !== key) return "↕";
+      return sortDir === "asc" ? "↑" : "↓";
+    };
+
+    const addSortableHeader = (label: string, key: SortKey) => {
+      const th = thead.createEl("th");
+      th.createEl("span", { text: label });
+      const btn = th.createEl("button", {
+        text: sortIndicator(key),
+        attr: {
+          style:
+            "margin-left: 0.35rem; padding: 0.15rem 0.35rem; font-size: 0.8rem; line-height: 1; cursor: pointer;",
+          type: "button",
+        },
+      });
+
+      btn.addEventListener("click", () => {
+        if (sortKey === key) {
+          sortDir = sortDir === "asc" ? "desc" : "asc";
+        } else {
+          sortKey = key;
+          sortDir = "asc";
+        }
+        // Update indicators and rerender
+        const headerBtns = thead.querySelectorAll<HTMLButtonElement>("button");
+        headerBtns.forEach((b) => {
+          const parentTh = b.parentElement;
+          if (!parentTh) return;
+          const labelSpan = parentTh.querySelector("span");
+          const currentLabel = labelSpan?.textContent ?? "";
+          // Map label back to key
+          const labelToKey: Record<string, SortKey> = {
+            Date: "date",
+            "Start/End": "startEnd",
+            "Priority Tasks": "priorityTasks",
+            Planned: "planned",
+            Completed: "completed",
+          };
+          const mappedKey = labelToKey[currentLabel];
+          if (mappedKey) {
+            b.textContent = sortIndicator(mappedKey);
+          }
+        });
+        renderRows();
+      });
+    };
+
+    addSortableHeader("Date", "date");
+    addSortableHeader("Start/End", "startEnd");
+    addSortableHeader("Priority Tasks", "priorityTasks");
+    addSortableHeader("Planned", "planned");
+    addSortableHeader("Completed", "completed");
+
+    const renderRows = () => {
+      tbody.empty();
+
+      const sortedDays = getSortedDays();
+      const visibleDays = showAll
+        ? sortedDays
+        : sortedDays.slice(0, maxVisibleDays);
+
+      visibleDays.forEach((day) => {
+        const plannedTasks = day.schedule.length;
+        const completedTasks = day.schedule.filter((t) => t.completed).length;
+
+        const priorityTasks = day.schedule.filter((t) => t.priority);
+        const priorityTotal = priorityTasks.length;
+        const priorityCompleted = priorityTasks.filter((t) => t.completed).length;
+
+        const startEndText =
+          !Number.isNaN(day.earliest) && !Number.isNaN(day.latest)
+            ? `${convTime(day.earliest)} - ${convTime(day.latest)}`
+            : "—";
+
+        const tr = tbody.createEl("tr");
+        tr.createEl("td", { text: day.date });
+        tr.createEl("td", { text: startEndText });
+        tr.createEl("td", {
+          text: priorityTotal === 0 ? "0/0" : `${priorityCompleted}/${priorityTotal}`,
+        });
+        tr.createEl("td", { text: `${plannedTasks}` });
+        tr.createEl("td", { text: `${completedTasks}` });
+      });
+    };
+
+    renderRows();
+
+    if (this.currDayData.length > maxVisibleDays) {
+      const actions = section.createDiv({
+        cls: "odpa-table-actions",
+        attr: { style: "margin-top: 0.75rem; margin-bottom: 0.25rem;" },
+      });
+      const moreBtn = actions.createEl("button", {
+        cls: "odpa-button odpa-button-secondary",
+        text: "Show more ▾",
+        attr: {
+          style:
+            "padding: 0.25rem 0.55rem; font-size: 0.85rem; line-height: 1;",
+        },
+      });
+
+      moreBtn.addEventListener("click", () => {
+        showAll = !showAll;
+        moreBtn.setText(showAll ? "Show less ▴" : "Show more ▾");
+        renderRows();
+      });
+    }
   }
 
   private renderTasksTable() {
