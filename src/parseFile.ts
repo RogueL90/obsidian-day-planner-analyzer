@@ -17,21 +17,48 @@ const parseFile = async (app: App, file: TFile) => {
         try{
             let time = 0;
             let curr = ''
-            while(val[ind]!== ':'){
+
+            // Parse hour portion. Accepts both "9:30pm" and shorthand like "9pm".
+            while(ind < val.length && !isNaN(Number(val[ind]))){
                 curr += val[ind]
                 ind++;
             }
             curr = curr.replace(/\s/g, '');
-            time += 60*Number(curr)
-            while((val[ind] === ' ' || isNaN(Number(val[ind])))){
+            const hourNum = Number(curr);
+            if(Number.isNaN(hourNum)) {
+                return {
+                    time: -1,
+                    newInd: -1,
+                    star: false
+                }
+            }
+            time += 60*hourNum
+
+            // Optional ":mm"
+            let minutePart = "0";
+            if(val[ind] === ':'){
+                ind++;
+                curr = ''
+                while(ind < val.length && !isNaN(Number(val[ind]))){
+                    curr += val[ind]
+                    ind++;
+                }
+                curr = curr.replace(/\s/g, '');
+                if(curr !== ''){
+                    minutePart = curr;
+                }
+            }
+
+            while(ind < val.length && val[ind] === ' '){
                 ind++;
             }
+
             curr = ''
-            while(val[ind]!==' ' && val[ind]!=='-'){
+            while(ind < val.length && val[ind]!==' ' && val[ind]!=='-'){
                 curr += val[ind]
                 ind++;
             }
-            curr = curr.replace(/\s/g, '');
+            curr = (minutePart + curr).replace(/\s/g, '');
             let star = false
             if(curr.endsWith('*')){
                 star = true
@@ -63,7 +90,8 @@ const parseFile = async (app: App, file: TFile) => {
 
     function addToSchedule(val: string): boolean{
         val = val.trim();
-        if(val.split(':').length<3 || !val.includes('-') || val===''){
+        // Accept both "9:30pm" and shorthand like "9pm", so don't require colons.
+        if(!val.includes('-') || val===''){
             return false;
         }
         //console.log(val)

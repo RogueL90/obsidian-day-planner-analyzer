@@ -885,25 +885,141 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
     const tableWrap = section.createDiv({ cls: "odpa-table-wrap" });
     const table = tableWrap.createEl("table", { cls: "odpa-table" });
     const thead = table.createEl("thead").createEl("tr");
-    ["Date", "Start/End", "Priority Tasks", "Planned", "Completed"].forEach((col) =>
-      thead.createEl("th", { text: col })
-    );
     const tbody = table.createEl("tbody");
-    const placeholderRows = [
-      { date: "-", planned: "—", unplanned: "—", tasks: "—", completion: "—" },
-      { date: "—", planned: "—", unplanned: "—", tasks: "—", completion: "—" },
-      { date: "—", planned: "—", unplanned: "—", tasks: "—", completion: "—" },
-      { date: "—", planned: "—", unplanned: "—", tasks: "—", completion: "—" },
-      { date: "—", planned: "—", unplanned: "—", tasks: "—", completion: "—" },
-    ];
-    placeholderRows.forEach((row) => {
-      const tr = tbody.createEl("tr");
-      tr.createEl("td", { text: row.date });
-      tr.createEl("td", { text: row.planned });
-      tr.createEl("td", { text: row.unplanned });
-      tr.createEl("td", { text: row.tasks });
-      tr.createEl("td", { text: row.completion });
-    });
+
+    type TaskRow = {
+      name: string;
+      timeSpentMinutes: number;
+      lastPerformed: string;
+    };
+    type SortKey = "name" | "timeSpent" | "lastPerformed";
+
+    const normalizeTaskName = (name: string) =>
+      name.trim().toLowerCase().replace(/\s+/g, " ");
+
+    const taskMap = new Map<string, TaskRow>();
+    for (const day of this.currDayData) {
+      for (const task of day.schedule) {
+        const normalized = normalizeTaskName(task.name);
+        if (!normalized) continue;
+
+        const duration = task.endTime - task.startTime;
+        const existing = taskMap.get(normalized);
+        if (!existing) {
+          taskMap.set(normalized, {
+            name: task.name.trim(),
+            timeSpentMinutes: duration,
+            lastPerformed: day.date,
+          });
+        } else {
+          existing.timeSpentMinutes += duration;
+          if (day.date > existing.lastPerformed) {
+            existing.lastPerformed = day.date;
+          }
+        }
+      }
+    }
+
+    const allRows = Array.from(taskMap.values());
+    const maxVisibleRows = 5;
+    let showAll = false;
+    let sortKey: SortKey = "timeSpent";
+    let sortDir: "asc" | "desc" = "desc";
+
+    const getSortedRows = () => {
+      const dir = sortDir === "asc" ? 1 : -1;
+      return [...allRows].sort((a, b) => {
+        if (sortKey === "name") return dir * a.name.localeCompare(b.name);
+        if (sortKey === "lastPerformed") return dir * a.lastPerformed.localeCompare(b.lastPerformed);
+        return dir * (a.timeSpentMinutes - b.timeSpentMinutes);
+      });
+    };
+
+    const sortIndicator = (key: SortKey) => {
+      if (sortKey !== key) return "↕";
+      return sortDir === "asc" ? "↑" : "↓";
+    };
+
+    const renderRows = () => {
+      tbody.empty();
+      const sorted = getSortedRows();
+      const visible = showAll ? sorted : sorted.slice(0, maxVisibleRows);
+
+      visible.forEach((row) => {
+        const tr = tbody.createEl("tr");
+        tr.createEl("td", { text: row.name });
+        tr.createEl("td", { text: timeFormat(row.timeSpentMinutes) });
+        tr.createEl("td", { text: row.lastPerformed });
+      });
+    };
+
+    const addSortableHeader = (label: string, key: SortKey) => {
+      const th = thead.createEl("th");
+      th.createEl("span", { text: label });
+      const btn = th.createEl("button", {
+        text: sortIndicator(key),
+        attr: {
+          style:
+            "margin-left: 0.35rem; padding: 0.15rem 0.35rem; font-size: 0.8rem; line-height: 1; cursor: pointer;",
+          type: "button",
+        },
+      });
+
+      btn.addEventListener("click", () => {
+        if (sortKey === key) {
+          sortDir = sortDir === "asc" ? "desc" : "asc";
+        } else {
+          sortKey = key;
+          sortDir = "asc";
+        }
+
+        const headerBtns = thead.querySelectorAll<HTMLButtonElement>("button");
+        headerBtns.forEach((b) => {
+          const parentTh = b.parentElement;
+          if (!parentTh) return;
+          const labelSpan = parentTh.querySelector("span");
+          const currentLabel = labelSpan?.textContent ?? "";
+          const labelToKey: Record<string, SortKey> = {
+            Name: "name",
+            "Time Spent": "timeSpent",
+            "Last Performed": "lastPerformed",
+          };
+          const mappedKey = labelToKey[currentLabel];
+          if (mappedKey) {
+            b.textContent = sortIndicator(mappedKey);
+          }
+        });
+
+        renderRows();
+      });
+    };
+
+    addSortableHeader("Name", "name");
+    addSortableHeader("Time Spent", "timeSpent");
+    addSortableHeader("Last Performed", "lastPerformed");
+
+    renderRows();
+
+    if (allRows.length > maxVisibleRows) {
+      const actions = section.createDiv({
+        cls: "odpa-table-actions",
+        attr: { style: "margin-top: 0.75rem; margin-bottom: 0.25rem;" },
+      });
+      const moreBtn = actions.createEl("button", {
+        cls: "odpa-button odpa-button-secondary",
+        text: "Show more ▾",
+        attr: {
+          style:
+            "padding: 0.25rem 0.55rem; font-size: 0.85rem; line-height: 1;",
+        },
+      });
+
+      moreBtn.addEventListener("click", () => {
+        showAll = !showAll;
+        moreBtn.setText(showAll ? "Show less ▴" : "Show more ▾");
+        renderRows();
+      });
+    }
   }
 }
 
