@@ -1,4 +1,4 @@
-# Day Planner Analyzer v1.0.2
+# Day Planner Analyzer v1.1.0
 
 Track how you really spend your time. This plugin reads your Day Planner-style daily notes and displays advanced, customizable statistics to help track your long term progress and give insights to your habits.
 
@@ -70,7 +70,7 @@ Use the tabs at the top: **Past 7 days**, **Past 30 days**, or **Custom**.
 
 Ask things like what to focus on today, how to reduce gaps in your schedule, or how to finish more priority tasks. The assistant only uses the summary for the range you have open — not your full note text.
 
-You can expand the chat, clear the conversation, or change the model in settings. Chat history is saved until you clear it.
+You can expand the chat or clear the conversation. In plugin settings, connect the assistant with your own OpenAI-compatible API key or a model you have downloaded in [Ollama](https://ollama.com). Chat history is saved until you clear it.
 
 <img width="1476" height="933" alt="Screenshot 2026-05-20 at 6 25 08 PM" src="https://github.com/user-attachments/assets/b21b2dec-2b56-4a01-a8ea-a28dc99f7f8d" />
 
@@ -99,7 +99,7 @@ See which tasks took the most time overall and when you last did each one.
 - Only notes named `YYYY-MM-DD.md` are included
 - Lines that don’t follow the time-range format are skipped
 - This plugin analyzes and displays stats only — it does not edit your schedule
-- The assistant needs internet access and only sees summary numbers, not your full notes
+- The assistant only sees summary numbers, not your full notes. An API-key provider needs internet access. Ollama runs on your machine and does not call a remote model host
 - If two tasks overlap in time, unplanned time is calculated as if they were one block
 
 I don't take donations, this plugin being useful to someone is enough :)

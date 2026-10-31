@@ -23,7 +23,15 @@ import {
 } from "chart.js";
 import { TimeBlock } from "./parseFile";
 import parseFile from './parseFile'
-import { DEFAULT_SETTINGS, DSASettingTab, DSASettings } from "./settings";
+import {
+  assertAssistantConfigured,
+  assistantChatCompletionsUrl,
+  assistantModel,
+  assistantRequestHeaders,
+  DSASettingTab,
+  DSASettings,
+  normalizeAssistantSettings,
+} from "./settings";
 import convTime from './convTime'
 import timeFormat from'./timeFormat'
 
@@ -75,8 +83,6 @@ function createExpandToggleSvg(expanded: boolean): SVGSVGElement {
   svg.appendChild(path);
   return svg;
 }
-
-const LLM_CHAT_COMPLETIONS_URL = "https://api.llm7.io/v1/chat/completions";
 
 const ASSISTANT_SYSTEM_PROMPT = `You are a concise, supportive productivity coach for someone using a Day Planner style schedule in Obsidian.
 You MUST base your reasoning only on the activity summary in this message. It matches the on-screen summary cards and tasks rollup (no per-day schedule or raw notes). If something is not in that summary, say you cannot infer it.
@@ -652,6 +658,8 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
   }
 
   private async callLLM(): Promise<string> {
+    assertAssistantConfigured(this.plugin.settings);
+
     const activityContext = this.buildActivityContext();
     let systemContent = `${ASSISTANT_SYSTEM_PROMPT}\n\n--- Activity data for this stats view ---\n${activityContext}`;
     if (systemContent.length > MAX_SYSTEM_TOTAL_CHARS) {
@@ -668,15 +676,21 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
     ];
 
     const res = await requestUrl({
-      url: LLM_CHAT_COMPLETIONS_URL,
+      url: assistantChatCompletionsUrl(this.plugin.settings),
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: assistantRequestHeaders(this.plugin.settings),
+      throw: false,
       body: JSON.stringify({
-        model: this.plugin.settings.chatModel,
+        model: assistantModel(this.plugin.settings),
         messages,
         temperature: 0.7,
+        stream: false,
       }),
     });
+
+    const secret =
+      this.plugin.settings.assistantProvider === "api" ? this.plugin.settings.apiKey.trim() : "";
+    const scrub = (text: string) => (secret ? text.split(secret).join("[redacted]") : text);
 
     if (res.status < 200 || res.status >= 300) {
       const fromJson = res.json as { error?: { message?: string } } | null;
@@ -686,7 +700,7 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
           ? res.text.slice(0, 800)
           : "");
       if (!detail) detail = `HTTP ${res.status}`;
-      throw new Error(`Assistant request failed (${res.status}): ${detail}`);
+      throw new Error(`Assistant request failed (${res.status}): ${scrub(detail)}`);
     }
 
     const data = res.json as {
@@ -694,7 +708,7 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
       error?: { message?: string };
     };
     if (data.error?.message) {
-      throw new Error(data.error.message);
+      throw new Error(scrub(data.error.message));
     }
 
     const content = data.choices?.[0]?.message?.content?.trim();
@@ -786,7 +800,7 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
         });
         hint.createDiv({
           cls: "odpa-chat-empty-desc",
-          text: "Ask about your schedule in this stats view. Messages are saved across sessions. Expand for a full-screen chat.",
+          text: "Ask about your schedule in this stats view. Messages are saved across sessions. Set an API key or an Ollama model in plugin settings. Expand for a full-screen chat.",
         });
       } else {
         const n = hist.length;
@@ -1566,7 +1580,8 @@ async refreshDayData() {
 }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, (await this.loadData()) as Partial<DSASettings>);
+    const loaded = ((await this.loadData()) ?? {}) as Partial<DSASettings> & { chatModel?: string };
+    this.settings = normalizeAssistantSettings(loaded);
   }
 
   async saveSettings() {
