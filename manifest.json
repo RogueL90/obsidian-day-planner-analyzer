@@ -1,7 +1,7 @@
 {
 	"id": "day-planner-analyzer",
 	"name": "Day Planner Analyzer",
-	"version": "1.1.0",
+	"version": "1.1.1",
 	"minAppVersion": "0.15.0",
 	"description": "Turn your scheduling history into long-term insights, habit trends, and time usage analytics.",
 	"author": "Pranay Jain",

@@ -89,6 +89,37 @@ export function assertAssistantConfigured(settings: DSASettings): void {
   }
 }
 
+export function parseUnknownJson(text: string): unknown {
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readErrorMessage(body: unknown): string {
+  if (!isRecord(body)) return "";
+  const message = body.error;
+  if (!isRecord(message)) return "";
+  return typeof message.message === "string" ? message.message : "";
+}
+
+function readOllamaModelNames(body: unknown): string[] {
+  if (!isRecord(body) || !Array.isArray(body.models)) return [];
+  const names: string[] = [];
+  for (const model of body.models as readonly unknown[]) {
+    if (!isRecord(model) || typeof model.name !== "string") continue;
+    const trimmed = model.name.trim();
+    if (trimmed) names.push(trimmed);
+  }
+  return names;
+}
+
 function redactSecret(text: string, secret: string): string {
   const trimmed = secret.trim();
   if (!trimmed) return text;
@@ -96,8 +127,7 @@ function redactSecret(text: string, secret: string): string {
 }
 
 function errorDetail(status: number, json: unknown, text: string, secret: string): string {
-  const fromJson = json as { error?: { message?: string } } | null;
-  let detail = fromJson?.error?.message ?? "";
+  let detail = readErrorMessage(json);
   if (!detail && text) detail = text.slice(0, 300);
   if (!detail) detail = `HTTP ${status}`;
   return redactSecret(detail, secret);
@@ -111,6 +141,163 @@ export class DSASettingTab extends PluginSettingTab {
   constructor(app: App, plugin: HelloWorldPlugin) {
     super(app, plugin);
     this.plugin = plugin;
+  }
+
+  /** Obsidian 1.13+ uses this for settings search and skips display(). */
+  getSettingDefinitions() {
+    const usesApi = () => this.plugin.settings.assistantProvider !== "ollama";
+    const usesOllama = () => this.plugin.settings.assistantProvider === "ollama";
+    return [
+      {
+        name: "Assistant provider",
+        desc: "Ollama can run a local model. You can also use your own API key.",
+        control: {
+          type: "dropdown" as const,
+          key: "assistantProvider",
+          defaultValue: "api",
+          options: {
+            api: "API key",
+            ollama: "Ollama (local)",
+          },
+        },
+      },
+      {
+        name: "API base URL",
+        desc: "Base URL for a chat-completions API. The plugin calls /chat/completions on this URL.",
+        visible: usesApi,
+        control: {
+          type: "text" as const,
+          key: "apiBaseUrl",
+          placeholder: DEFAULT_SETTINGS.apiBaseUrl,
+        },
+      },
+      {
+        name: "API key",
+        desc: "Sent only with each request. Stored in this vault's plugin data.",
+        visible: usesApi,
+        render: (setting: Setting) => {
+          setting.addText((text) => {
+            text.inputEl.type = "password";
+            text
+              .setPlaceholder("Paste your key")
+              .setValue(this.plugin.settings.apiKey)
+              .onChange(async (value) => {
+                this.plugin.settings.apiKey = value.trim();
+                await this.plugin.saveSettings();
+              });
+          });
+        },
+      },
+      {
+        name: "Model",
+        desc: "Model ID for this provider, such as gpt-4o-mini.",
+        visible: usesApi,
+        control: {
+          type: "text" as const,
+          key: "apiModel",
+          placeholder: DEFAULT_SETTINGS.apiModel,
+        },
+      },
+      {
+        name: "Ollama host",
+        desc: "Local Ollama server. The default is http://127.0.0.1:11434.",
+        visible: usesOllama,
+        control: {
+          type: "text" as const,
+          key: "ollamaBaseUrl",
+          placeholder: DEFAULT_SETTINGS.ollamaBaseUrl,
+        },
+      },
+      {
+        name: "Ollama model",
+        desc: "Ollama models appear here after a refresh. You can also type a model name.",
+        visible: usesOllama,
+        control: {
+          type: "text" as const,
+          key: "ollamaModel",
+          placeholder: "Model name",
+        },
+      },
+      {
+        name: "Refresh models",
+        desc: "Load model names from the Ollama host.",
+        visible: usesOllama,
+        render: (setting: Setting) => {
+          if (this.ollamaModels.length > 0) {
+            setting.addDropdown((dropdown) => {
+              dropdown.addOption("", "Select a model");
+              for (const name of this.ollamaModels) dropdown.addOption(name, name);
+              const current = this.plugin.settings.ollamaModel;
+              dropdown.setValue(this.ollamaModels.includes(current) ? current : "");
+              dropdown.onChange(async (value) => {
+                if (!value) return;
+                this.plugin.settings.ollamaModel = value;
+                await this.plugin.saveSettings();
+                this.refreshSettingsView();
+              });
+            });
+          }
+          setting.addButton((btn) =>
+            btn.setButtonText("Refresh models").onClick(() => {
+              btn.buttonEl.disabled = true;
+              btn.setButtonText("Refreshing…");
+              void this.finishOllamaRefresh();
+            }),
+          );
+        },
+      },
+      {
+        name: "Test connection",
+        desc: "Sends a one-token completion with the selected provider.",
+        render: (setting: Setting) => {
+          setting.addButton((btn) =>
+            btn.setButtonText("Test connection").onClick(() => {
+              btn.buttonEl.disabled = true;
+              btn.setButtonText("Testing…");
+              void this.finishConnectionTest();
+            }),
+          );
+        },
+      },
+      {
+        name: "Connection status",
+        desc: this.statusMessage,
+        visible: () => this.statusMessage.length > 0,
+      },
+      {
+        name: "Clear assistant chat history",
+        desc: "Remove all saved messages from the productivity assistant.",
+        render: (setting: Setting) => {
+          setting.addButton((btn) =>
+            btn.setButtonText("Clear chat").onClick(async () => {
+              this.plugin.settings.chatHistory = [];
+              await this.plugin.saveSettings();
+            }),
+          );
+        },
+      },
+    ];
+  }
+
+  private refreshSettingsView(): void {
+    const host = this as PluginSettingTab & { update?: () => void };
+    if (typeof host.update === "function") {
+      host.update();
+      return;
+    }
+    this.display();
+  }
+
+  private async finishOllamaRefresh(): Promise<void> {
+    const err = await this.fetchOllamaModels();
+    const count = this.ollamaModels.length;
+    this.statusMessage = err ?? `Found ${count} model${count === 1 ? "" : "s"}.`;
+    this.refreshSettingsView();
+  }
+
+  private async finishConnectionTest(): Promise<void> {
+    this.statusMessage = await this.testAssistantConnection();
+    this.refreshSettingsView();
   }
 
   display(): void {
@@ -149,7 +336,7 @@ export class DSASettingTab extends PluginSettingTab {
       )
       .addButton((btn) =>
         btn.setButtonText("Test connection").onClick(async () => {
-          btn.setDisabled(true);
+          btn.buttonEl.disabled = true;
           btn.setButtonText("Testing…");
           this.statusMessage = await this.testAssistantConnection();
           this.display();
@@ -261,7 +448,7 @@ export class DSASettingTab extends PluginSettingTab {
       })
       .addButton((btn) =>
         btn.setButtonText("Refresh models").onClick(async () => {
-          btn.setDisabled(true);
+          btn.buttonEl.disabled = true;
           btn.setButtonText("Refreshing…");
           const err = await this.fetchOllamaModels();
           this.statusMessage =
@@ -285,10 +472,7 @@ export class DSASettingTab extends PluginSettingTab {
         this.ollamaModels = [];
         return `Could not reach Ollama (HTTP ${res.status}). You can still type a model name.`;
       }
-      const data = res.json as { models?: Array<{ name?: string }> };
-      const found = (data.models ?? [])
-        .map((model) => model.name?.trim() ?? "")
-        .filter((name) => name.length > 0);
+      const found = readOllamaModelNames(parseUnknownJson(res.text));
       this.ollamaModels = found;
       if (found.length === 0) {
         return "Ollama is running, but no models are installed. You can still type a model name.";
@@ -331,13 +515,14 @@ export class DSASettingTab extends PluginSettingTab {
           stream: false,
         }),
       });
+      const body = parseUnknownJson(res.text);
       if (res.status < 200 || res.status >= 300) {
-        const detail = errorDetail(res.status, res.json, res.text, secret);
+        const detail = errorDetail(res.status, body, res.text, secret);
         return `Connection failed (${res.status}): ${detail}`;
       }
-      const data = res.json as { error?: { message?: string } };
-      if (data.error?.message) {
-        return `Connection failed: ${redactSecret(data.error.message, secret)}`;
+      const message = readErrorMessage(body);
+      if (message) {
+        return `Connection failed: ${redactSecret(message, secret)}`;
       }
       return "Connection succeeded.";
     } catch (err) {

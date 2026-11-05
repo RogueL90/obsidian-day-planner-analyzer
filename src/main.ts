@@ -31,6 +31,7 @@ import {
   DSASettingTab,
   DSASettings,
   normalizeAssistantSettings,
+  parseUnknownJson,
 } from "./settings";
 import convTime from './convTime'
 import timeFormat from'./timeFormat'
@@ -61,27 +62,37 @@ const setCssProps = (el: HTMLElement, props: Record<string, string>) => {
   }
 };
 
-/** Screen-corner brackets: outward = expand, inward = minimize (stroke icon). */
-function createExpandToggleSvg(expanded: boolean): SVGSVGElement {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("width", "18");
-  svg.setAttribute("height", "18");
-  svg.setAttribute("aria-hidden", "true");
-  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path.setAttribute("fill", "none");
-  path.setAttribute("stroke", "currentColor");
-  path.setAttribute("stroke-width", "2");
-  path.setAttribute("stroke-linecap", "round");
-  path.setAttribute("stroke-linejoin", "round");
-  path.setAttribute(
-    "d",
-    expanded
-      ? "M8 4H4v4M16 4h4v4M8 20H4v-4M16 20h4v-4"
-      : "M4 8V4h4M20 8V4h-4M4 16v4h4M20 16v4h-4",
-  );
-  svg.appendChild(path);
-  return svg;
+function mountIcon(
+  parent: HTMLElement,
+  size: number,
+  pathAttr: Record<string, string>,
+): void {
+  parent.empty();
+  const svg = parent.createSvg("svg", {
+    attr: {
+      viewBox: "0 0 24 24",
+      width: size,
+      height: size,
+      "aria-hidden": "true",
+    },
+  });
+  svg.createSvg("path", { attr: pathAttr });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readAssistantError(body: unknown): string {
+  if (!isRecord(body) || !isRecord(body.error)) return "";
+  return typeof body.error.message === "string" ? body.error.message : "";
+}
+
+function readAssistantContent(body: unknown): string {
+  if (!isRecord(body) || !Array.isArray(body.choices)) return "";
+  const first: unknown = (body.choices as readonly unknown[])[0];
+  if (!isRecord(first) || !isRecord(first.message)) return "";
+  return typeof first.message.content === "string" ? first.message.content.trim() : "";
 }
 
 const ASSISTANT_SYSTEM_PROMPT = `You are a concise, supportive productivity coach for someone using a Day Planner style schedule in Obsidian.
@@ -417,8 +428,7 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
   private renderHeader() {
     const header = this.bodyEl!.createDiv({ cls: "odpa-stats-header" });
     const left = header.createDiv({ cls: "odpa-stats-header-left" });
-    // eslint-disable-next-line -- product title per design
-    left.createEl("h2", { text: "Day Planner Analyzer" });
+    left.createEl("h2", { text: "Day planner analyzer" });
     left.createEl("p", { cls: "odpa-stats-subtitle", text: "Advanced statistics" });
 
     const right = header.createDiv({ cls: "odpa-stats-header-right" });
@@ -691,27 +701,18 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
     const secret =
       this.plugin.settings.assistantProvider === "api" ? this.plugin.settings.apiKey.trim() : "";
     const scrub = (text: string) => (secret ? text.split(secret).join("[redacted]") : text);
+    const body = parseUnknownJson(typeof res.text === "string" ? res.text : "");
 
     if (res.status < 200 || res.status >= 300) {
-      const fromJson = res.json as { error?: { message?: string } } | null;
-      let detail =
-        fromJson?.error?.message ??
-        (typeof res.text === "string" && res.text.length > 0
-          ? res.text.slice(0, 800)
-          : "");
-      if (!detail) detail = `HTTP ${res.status}`;
-      throw new Error(`Assistant request failed (${res.status}): ${scrub(detail)}`);
+      const detail = readAssistantError(body) || (typeof res.text === "string" ? res.text.slice(0, 800) : "");
+      throw new Error(`Assistant request failed (${res.status}): ${scrub(detail || `HTTP ${res.status}`)}`);
     }
 
-    const data = res.json as {
-      choices?: Array<{ message?: { content?: string | null } }>;
-      error?: { message?: string };
-    };
-    if (data.error?.message) {
-      throw new Error(scrub(data.error.message));
+    if (readAssistantError(body)) {
+      throw new Error(scrub(readAssistantError(body)));
     }
 
-    const content = data.choices?.[0]?.message?.content?.trim();
+    const content = readAssistantContent(body);
     if (!content) {
       throw new Error("Empty response from assistant.");
     }
@@ -732,8 +733,16 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
     });
     const expandIconWrap = expandBtn.createSpan({ cls: "odpa-chat-expand-icon-wrap" });
     const syncExpandIcon = () => {
-      expandIconWrap.empty();
-      expandIconWrap.appendChild(createExpandToggleSvg(this.chatExpanded));
+      mountIcon(expandIconWrap, 18, {
+        fill: "none",
+        stroke: "currentColor",
+        "stroke-width": "2",
+        "stroke-linecap": "round",
+        "stroke-linejoin": "round",
+        d: this.chatExpanded
+          ? "M8 4H4v4M16 4h4v4M8 20H4v-4M16 20h4v-4"
+          : "M4 8V4h4M20 8V4h-4M4 16v4h4M20 16v4h-4",
+      });
       expandBtn.setAttribute(
         "aria-label",
         this.chatExpanded ? "Minimize chat" : "Expand chat",
@@ -744,7 +753,7 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
       this.chatExpanded = !this.chatExpanded;
       syncExpandIcon();
       this.applyChatExpandedLayout();
-      requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
         logEl.scrollTop = logEl.scrollHeight;
         textarea.focus();
       });
@@ -775,16 +784,10 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
     });
     const sendInner = sendBtn.createSpan({ cls: "odpa-chat-send-inner" });
     const iconWrap = sendInner.createSpan({ cls: "odpa-chat-send-icon" });
-    const sendSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    sendSvg.setAttribute("viewBox", "0 0 24 24");
-    sendSvg.setAttribute("width", "18");
-    sendSvg.setAttribute("height", "18");
-    sendSvg.setAttribute("aria-hidden", "true");
-    const sendPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    sendPath.setAttribute("fill", "currentColor");
-    sendPath.setAttribute("d", "M2.01 21L23 12 2.01 3 2 10l15 2-15 2z");
-    sendSvg.appendChild(sendPath);
-    iconWrap.appendChild(sendSvg);
+    mountIcon(iconWrap, 18, {
+      fill: "currentColor",
+      d: "M2.01 21L23 12 2.01 3 2 10l15 2-15 2z",
+    });
     sendInner.createSpan({ cls: "odpa-chat-send-label", text: "Send" });
 
     const renderMessages = async (animateTail = 0) => {
@@ -846,7 +849,7 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
           });
         }
       }
-      requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
         logEl.scrollTop = logEl.scrollHeight;
       });
     };
@@ -934,8 +937,7 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
     });
 
     const chartHeader = right.createDiv({ cls: "odpa-chart-header" });
-    // eslint-disable-next-line -- product title per design
-    chartHeader.createEl("h3", { text: "Tasks Graph" });
+    chartHeader.createEl("h3", { text: "Tasks graph" });
 
     const selectWrap = chartHeader.createDiv({ cls: "odpa-chart-select-wrap" });
     selectWrap.createEl("span", {
@@ -959,19 +961,14 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
       cls: "odpa-chart-select-caret",
       attr: { "aria-hidden": "true" },
     });
-    const caretSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    caretSvg.setAttribute("viewBox", "0 0 24 24");
-    caretSvg.setAttribute("width", "14");
-    caretSvg.setAttribute("height", "14");
-    const caretPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    caretPath.setAttribute("fill", "none");
-    caretPath.setAttribute("stroke", "currentColor");
-    caretPath.setAttribute("stroke-width", "2");
-    caretPath.setAttribute("stroke-linecap", "round");
-    caretPath.setAttribute("stroke-linejoin", "round");
-    caretPath.setAttribute("d", "M6 9l6 6 6-6");
-    caretSvg.appendChild(caretPath);
-    caret.appendChild(caretSvg);
+    mountIcon(caret, 14, {
+      fill: "none",
+      stroke: "currentColor",
+      "stroke-width": "2",
+      "stroke-linecap": "round",
+      "stroke-linejoin": "round",
+      d: "M6 9l6 6 6-6",
+    });
 
     const chartArea = right.createDiv({ cls: "odpa-chart-area" });
 
@@ -1125,8 +1122,14 @@ getDisplayDataBetw(dayStart: string, dayEnd: string){
             tooltip: {
               callbacks: {
                 label(context) {
-                  const val = context.parsed.y as number;
-                  return `${val.toFixed(2)} hours`;
+                  const parsed: unknown = context.parsed;
+                  const y =
+                    parsed !== null && typeof parsed === "object" && "y" in parsed
+                      ? parsed.y
+                      : undefined;
+                  const hours = typeof y === "number" ? y : Number(y);
+                  const shown = Number.isFinite(hours) ? hours.toFixed(2) : "0.00";
+                  return `${shown} hours`;
                 },
               },
             },
@@ -1552,7 +1555,7 @@ export default class HelloWorldPlugin extends Plugin {
 
     this.addSettingTab(new DSASettingTab(this.app, this));
     this.addCommand({
-      id: "day-planner-analyzer-open",
+      id: "open-advanced-statistics",
       name: "Advanced statistics",
       callback: () => {
         new StatsModal(this.app, this).open();
